@@ -116,12 +116,16 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
+          # requirements.txt in the repo root is used as the cache key.
+          # pyinstaller is a build-only tool and lives outside this file.
+          cache-dependency-path: "requirements.txt"
 
       # ── 5. Install build dependencies ───────────────────────────────────────
       - name: "Install Python build dependencies"
         run: |
           python -m pip install --upgrade pip
-          pip install pydivert pyinstaller
+          pip install -r requirements.txt
+          pip install pyinstaller
           python -m pip show pydivert pyinstaller
 
       # ── 6. Download and extract WinDivert ───────────────────────────────────
