@@ -1,0 +1,12 @@
+{
+  "target_domains": [
+    "discord.com",
+    "discordapp.com",
+    "gateway.discord.gg",
+    "discord.media",
+    "cdn.discordapp.com"
+  ],
+  "split_position": 2,
+  "desync_mode": "split",
+  "udp_fake_enabled": true
+}

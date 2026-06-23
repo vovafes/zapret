@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.spec
+
+# PyInstaller artifacts
+zapret-discord.exe
+
+# WinDivert binaries (distributed via Releases only)
+WinDivert.dll
+WinDivert64.sys
+WinDivert.lib
+
+# Release archives
+*.zip
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
