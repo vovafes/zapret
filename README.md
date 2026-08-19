@@ -18,7 +18,9 @@
 ## 🆕 Последние изменения `config.json`
 
 - **Исправлена загрузка фото.** `media.discordapp.net` (домен, через который клиент грузит превью и вложения-изображения) не входил в `target_domains`, из-за чего эти соединения не десинхронизировались и блокировались ТСПУ отдельно от текста и голоса. Добавлен `discordapp.net` — подстрочное совпадение покрывает все поддомены (`media.`, `images-ext-*.` и т.д.).
-- **Добавлены домены YouTube и Instagram** (`youtube.com`, `googlevideo.com`, `ytimg.com`, `ggpht.com`, `instagram.com`, `cdninstagram.com`, `fbcdn.net`) — тот же механизм фрагментации `TLS ClientHello` работает для любого HTTPS-сервиса, попавшего под блокировку по SNI, не только для Discord. Достаточно, чтобы домен был в списке.
+- **Список доменов расширен под другие заблокированные в СНГ сервисы** — тот же механизм фрагментации `TLS ClientHello` работает для любого HTTPS-сервиса, попавшего под SNI-блокировку по ТСПУ, не только для Discord. Добавлены: YouTube (`googlevideo.com`, `ytimg.com`, `ggpht.com`), Instagram/Facebook (`fbcdn.net`, `facebook.com`), X/Twitter (`x.com`, `twimg.com`), WhatsApp, Signal, LinkedIn, Viber, Snapchat, Twitch, Roblox и TikTok. Полный актуальный список — в [`config.json`](https://github.com/vovafes/zapret/blob/main/config.json).
+
+> ⚠️ Список не панацея: часть перечисленных сервисов (например, Facebook/Instagram как продукты Meta, X) в некоторых странах СНГ блокируется не только по SNI, но и по IP/DNS — фрагментация `ClientHello` тут не поможет без дополнительного обхода DNS-блокировки (смена DNS-сервера или DoH). Если после обновления сервис всё ещё недоступен — сначала проверьте, резолвится ли домен вообще.
 
 > Изменения применяются автоматически при следующем запуске программы через облачный конфиг — если вы правите `config.json` локально для сборки из исходников, синхронизируйте эти домены вручную.
 
@@ -167,7 +169,30 @@ https://raw.githubusercontent.com/vovafes/zapret/main/config.json
     "ggpht.com",
     "instagram.com",
     "cdninstagram.com",
-    "fbcdn.net"
+    "fbcdn.net",
+    "facebook.com",
+    "fb.com",
+    "twitter.com",
+    "x.com",
+    "twimg.com",
+    "whatsapp.com",
+    "whatsapp.net",
+    "signal.org",
+    "whispersystems.org",
+    "linkedin.com",
+    "licdn.com",
+    "viber.com",
+    "snapchat.com",
+    "sc-cdn.net",
+    "twitch.tv",
+    "ttvnw.net",
+    "jtvnw.net",
+    "roblox.com",
+    "rbxcdn.com",
+    "tiktok.com",
+    "tiktokcdn.com",
+    "tiktokv.com",
+    "musical.ly"
   ],
   "desync_mode": "fake_multisplit",
   "split_position": 2,
