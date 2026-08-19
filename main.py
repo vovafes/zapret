@@ -35,9 +35,18 @@ DEFAULT_CONFIG: dict = {
     "target_domains": [
         "discord.com",
         "discordapp.com",
+        "discordapp.net",
         "gateway.discord.gg",
         "discord.media",
         "cdn.discordapp.com",
+        "youtube.com",
+        "youtube-nocookie.com",
+        "googlevideo.com",
+        "ytimg.com",
+        "ggpht.com",
+        "instagram.com",
+        "cdninstagram.com",
+        "fbcdn.net",
     ],
     # desync_mode: "fake_multisplit" (по умолч.) | "multisplit" | "split" | "disorder"
     "desync_mode":          "fake_multisplit",

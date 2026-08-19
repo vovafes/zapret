@@ -15,6 +15,13 @@
 
 ---
 
+## 🆕 Последние изменения `config.json`
+
+- **Исправлена загрузка фото.** `media.discordapp.net` (домен, через который клиент грузит превью и вложения-изображения) не входил в `target_domains`, из-за чего эти соединения не десинхронизировались и блокировались ТСПУ отдельно от текста и голоса. Добавлен `discordapp.net` — подстрочное совпадение покрывает все поддомены (`media.`, `images-ext-*.` и т.д.).
+- **Добавлены домены YouTube и Instagram** (`youtube.com`, `googlevideo.com`, `ytimg.com`, `ggpht.com`, `instagram.com`, `cdninstagram.com`, `fbcdn.net`) — тот же механизм фрагментации `TLS ClientHello` работает для любого HTTPS-сервиса, попавшего под блокировку по SNI, не только для Discord. Достаточно, чтобы домен был в списке.
+
+> Изменения применяются автоматически при следующем запуске программы через облачный конфиг — если вы правите `config.json` локально для сборки из исходников, синхронизируйте эти домены вручную.
+
 ## 🆕 Что нового в v2.0.0
 
 Провайдеры обновили ТСПУ: старый способ обхода (разбить пакет ровно на 2 части) в 2026 году перестал стабильно работать, потому что фильтр теперь сначала собирает весь поток и только потом его проверяет. Новая версия обходит это:
@@ -149,9 +156,18 @@ https://raw.githubusercontent.com/vovafes/zapret/main/config.json
   "target_domains": [
     "discord.com",
     "discordapp.com",
+    "discordapp.net",
     "gateway.discord.gg",
     "discord.media",
-    "cdn.discordapp.com"
+    "cdn.discordapp.com",
+    "youtube.com",
+    "youtube-nocookie.com",
+    "googlevideo.com",
+    "ytimg.com",
+    "ggpht.com",
+    "instagram.com",
+    "cdninstagram.com",
+    "fbcdn.net"
   ],
   "desync_mode": "fake_multisplit",
   "split_position": 2,
@@ -168,7 +184,7 @@ https://raw.githubusercontent.com/vovafes/zapret/main/config.json
 
 | Параметр | Тип | По умолчанию | Описание |
 |---|---|---|---|
-| `target_domains` | `string[]` | — | Домены Discord для перехвата |
+| `target_domains` | `string[]` | — | Домены для перехвата (совпадение — по подстроке в SNI, поэтому `"discordapp.net"` уже покрывает `media.discordapp.net`, `images-ext-1.discordapp.net` и т.д.) |
 | `desync_mode` | `string` | `"fake_multisplit"` | `"fake_multisplit"`, `"multisplit"`, `"split"` (legacy) или `"disorder"` (legacy) |
 | `split_position` | `integer` | `2` | Позиция разбивки — используется только в legacy-режимах |
 | `fragment_count_min` / `fragment_count_max` | `integer` | `3` / `7` | Диапазон числа фрагментов ClientHello в режимах `multisplit`/`fake_multisplit` |
