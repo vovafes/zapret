@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-zapret-discord v2.0.0
+zapret-discord v2.1.0
 Локальный инструмент обхода DPI-блокировок для Discord.
 Репозиторий: https://github.com/vovafes/zapret
 """
@@ -20,7 +20,7 @@ from datetime import datetime
 # Константы
 # ──────────────────────────────────────────────────────────────────────────────
 
-VERSION    = "2.0.0"
+VERSION    = "2.1.0"
 CONFIG_URL = "https://raw.githubusercontent.com/vovafes/zapret/main/config.json"
 
 # Домены-приманки для фейковых ClientHello (не должны совпадать с реальной целью)

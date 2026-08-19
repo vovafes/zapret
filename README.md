@@ -15,7 +15,7 @@
 
 ---
 
-## 🆕 Последние изменения `config.json`
+## 🆕 Что нового в v2.1.0
 
 - **Исправлена загрузка фото.** `media.discordapp.net` (домен, через который клиент грузит превью и вложения-изображения) не входил в `target_domains`, из-за чего эти соединения не десинхронизировались и блокировались ТСПУ отдельно от текста и голоса. Добавлен `discordapp.net` — подстрочное совпадение покрывает все поддомены (`media.`, `images-ext-*.` и т.д.).
 - **Список доменов расширен под другие заблокированные в СНГ сервисы** — тот же механизм фрагментации `TLS ClientHello` работает для любого HTTPS-сервиса, попавшего под SNI-блокировку по ТСПУ, не только для Discord. Добавлены: YouTube (`googlevideo.com`, `ytimg.com`, `ggpht.com`), Instagram/Facebook (`fbcdn.net`, `facebook.com`), X/Twitter (`x.com`, `twimg.com`), WhatsApp, Signal, LinkedIn, Viber, Snapchat, Twitch, Roblox и TikTok. Полный актуальный список — в [`config.json`](https://github.com/vovafes/zapret/blob/main/config.json).
