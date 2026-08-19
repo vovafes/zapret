@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-zapret-discord v1.2.0
+zapret-discord v2.0.0
 Локальный инструмент обхода DPI-блокировок для Discord.
 Репозиторий: https://github.com/vovafes/zapret
 """
@@ -10,6 +10,7 @@ import sys
 import os
 import ctypes
 import json
+import random
 import time
 import threading
 import urllib.request
@@ -19,8 +20,16 @@ from datetime import datetime
 # Константы
 # ──────────────────────────────────────────────────────────────────────────────
 
-VERSION    = "1.2.0"
+VERSION    = "2.0.0"
 CONFIG_URL = "https://raw.githubusercontent.com/vovafes/zapret/main/config.json"
+
+# Домены-приманки для фейковых ClientHello (не должны совпадать с реальной целью)
+DECOY_SNI_POOL = [
+    b"www.google.com",
+    b"www.microsoft.com",
+    b"www.cloudflare.com",
+    b"www.apple.com",
+]
 
 DEFAULT_CONFIG: dict = {
     "target_domains": [
@@ -30,9 +39,17 @@ DEFAULT_CONFIG: dict = {
         "discord.media",
         "cdn.discordapp.com",
     ],
-    "split_position":   2,
-    "desync_mode":      "split",
-    "udp_fake_enabled": True,
+    # desync_mode: "fake_multisplit" (по умолч.) | "multisplit" | "split" | "disorder"
+    "desync_mode":          "fake_multisplit",
+    "split_position":       2,      # используется только режимами "split"/"disorder"
+    "fragment_count_min":   3,      # многосегментная фрагментация: мин. число частей
+    "fragment_count_max":   7,      # максимум частей
+    "randomize_fragments":  True,   # случайные позиции разрыва при каждом ClientHello
+    "shuffle_fragment_order": True, # отправлять сегменты не по порядку
+    "fake_packet_enabled":  True,   # инъекция фейкового ClientHello перед реальным
+    "fake_packet_count":    1,      # сколько фейковых пакетов отправлять
+    "fake_packet_ttl":      4,      # TTL фейка — гарантированно не доходит до сервера
+    "udp_fake_enabled":     True,
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -104,17 +121,29 @@ def fetch_remote_config() -> tuple:
 
         cfg = json.loads(raw)
 
-        required_keys = {"target_domains", "split_position", "desync_mode", "udp_fake_enabled"}
-        missing = required_keys - set(cfg.keys())
-        if missing:
-            raise ValueError(f"Неполный конфиг — отсутствуют поля: {missing}")
+        if "target_domains" not in cfg or "desync_mode" not in cfg:
+            raise ValueError("Неполный конфиг — отсутствуют обязательные поля")
 
-        cfg["split_position"]   = int(cfg["split_position"])
-        cfg["udp_fake_enabled"] = bool(cfg["udp_fake_enabled"])
-        cfg["desync_mode"]      = str(cfg["desync_mode"]).lower()
-        cfg["target_domains"]   = [str(d).lower() for d in cfg["target_domains"]]
+        # Мягкое слияние: неизвестные/отсутствующие поля берём из DEFAULT_CONFIG,
+        # чтобы старый удалённый config.json не ломал новый клиент и наоборот.
+        merged = DEFAULT_CONFIG.copy()
+        merged.update(cfg)
 
-        return cfg, True
+        merged["split_position"]         = int(merged["split_position"])
+        merged["udp_fake_enabled"]       = bool(merged["udp_fake_enabled"])
+        merged["desync_mode"]            = str(merged["desync_mode"]).lower()
+        merged["target_domains"]         = [str(d).lower() for d in merged["target_domains"]]
+        merged["fragment_count_min"]     = max(2, int(merged["fragment_count_min"]))
+        merged["fragment_count_max"]     = max(
+            merged["fragment_count_min"], int(merged["fragment_count_max"])
+        )
+        merged["randomize_fragments"]    = bool(merged["randomize_fragments"])
+        merged["shuffle_fragment_order"] = bool(merged["shuffle_fragment_order"])
+        merged["fake_packet_enabled"]    = bool(merged["fake_packet_enabled"])
+        merged["fake_packet_count"]      = max(0, int(merged["fake_packet_count"]))
+        merged["fake_packet_ttl"]        = max(1, min(255, int(merged["fake_packet_ttl"])))
+
+        return merged, True
 
     except Exception:
         return DEFAULT_CONFIG.copy(), False
@@ -133,6 +162,12 @@ def print_banner(config: dict, cloud_ok: bool) -> None:
     )
     udp_str  = f"{GREEN}Включён{RESET}" if config["udp_fake_enabled"] else f"{RED}Выключен{RESET}"
     mode_str = f"{YELLOW}{config['desync_mode'].upper()}{RESET}"
+    fake_str = (
+        f"{GREEN}Вкл. ×{config['fake_packet_count']} (TTL {config['fake_packet_ttl']}){RESET}"
+        if config["fake_packet_enabled"]
+        else f"{RED}Выключен{RESET}"
+    )
+    frag_str = f"{YELLOW}{config['fragment_count_min']}–{config['fragment_count_max']}{RESET}"
     dom_list = config["target_domains"]
     dom_str  = ", ".join(dom_list[:3])
     if len(dom_list) > 3:
@@ -147,8 +182,9 @@ def print_banner(config: dict, cloud_ok: bool) -> None:
           f"   │   Обход DPI-блокировок Discord")
     print(line)
     print(f"  {'Облачный конфиг':<22}: {sync_str}")
-    print(f"  {'Режим десинхр.':<22}: {mode_str}  │  позиция сплита: "
-          f"{YELLOW}{config['split_position']}{RESET} байт")
+    print(f"  {'Режим десинхр.':<22}: {mode_str}")
+    print(f"  {'Фрагментов на Hello':<22}: {frag_str}")
+    print(f"  {'Фейковый ClientHello':<22}: {fake_str}")
     print(f"  {'UDP / Голос (RTC)':<22}: {udp_str}  "
           f"{DIM}(порты 50000–65535){RESET}")
     print(f"  {'Целевые домены':<22}: {dom_str}")
@@ -201,6 +237,90 @@ def payload_matches_domains(payload: bytes, domains: list) -> bool:
     return False
 
 # ──────────────────────────────────────────────────────────────────────────────
+# TTL — общий хелпер для IPv4/IPv6
+# ──────────────────────────────────────────────────────────────────────────────
+
+def get_ttl(packet):
+    if packet.ipv4:
+        return packet.ipv4.ttl
+    if packet.ipv6:
+        return packet.ipv6.hop_limit
+    return None
+
+
+def set_ttl(packet, ttl: int) -> None:
+    if packet.ipv4:
+        packet.ipv4.ttl = ttl
+    elif packet.ipv6:
+        packet.ipv6.hop_limit = ttl
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Фейковый ClientHello (TTL-trick)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def build_fake_clienthello(real_payload: bytes) -> bytes:
+    """
+    Собрать поддельный TLS ClientHello того же размера, что и настоящий:
+    сохраняет TLS-заголовок (байты 0-5), чтобы пройти сигнатурную проверку
+    DPI, но заполняет остальное случайным мусором с подставным SNI из
+    DECOY_SNI_POOL — реальный домен цели в пакет не попадает.
+    Пакет отправляется с заниженным TTL и до сервера физически не доходит,
+    поэтому на соединение он не влияет — только сбивает трекинг DPI.
+    """
+    decoy   = random.choice(DECOY_SNI_POOL)
+    garbage = bytearray(random.randbytes(len(real_payload)))
+    garbage[:6] = real_payload[:6]  # валидный TLS Handshake/ClientHello заголовок
+
+    if len(decoy) < len(garbage) - 6:
+        offset = random.randint(6, len(garbage) - len(decoy))
+        garbage[offset:offset + len(decoy)] = decoy
+
+    return bytes(garbage)
+
+
+def send_fake_packets(packet, real_payload: bytes, base_seq: int, config: dict, w) -> None:
+    original_ttl = get_ttl(packet)
+    if original_ttl is None:
+        return
+
+    for _ in range(config["fake_packet_count"]):
+        set_ttl(packet, config["fake_packet_ttl"])
+        packet.payload     = build_fake_clienthello(real_payload)
+        packet.tcp.seq_num = base_seq
+        w.send(packet, recalculate_checksum=True)
+
+    set_ttl(packet, original_ttl)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Многосегментная фрагментация
+# ──────────────────────────────────────────────────────────────────────────────
+
+def pick_fragment_positions(payload_len: int, config: dict) -> list:
+    """
+    Вернуть отсортированный список уникальных точек разрыва внутри payload.
+    Число фрагментов — случайное из [fragment_count_min, fragment_count_max],
+    ограниченное длиной payload (нужен хотя бы 1 байт на фрагмент).
+    """
+    max_possible = max(1, payload_len - 1)
+
+    if config["randomize_fragments"]:
+        count = random.randint(config["fragment_count_min"], config["fragment_count_max"])
+    else:
+        count = config["fragment_count_min"]
+
+    count = min(count, max_possible)
+    if count < 2:
+        return [payload_len // 2] if payload_len > 1 else []
+
+    positions = sorted(random.sample(range(1, payload_len), count - 1))
+    return positions
+
+
+def split_payload(payload: bytes, positions: list) -> list:
+    bounds  = [0, *positions, len(payload)]
+    return [payload[bounds[i]:bounds[i + 1]] for i in range(len(bounds) - 1)]
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Обработка TCP — фрагментация TLS ClientHello
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -208,13 +328,21 @@ def process_tcp(packet, config: dict, w) -> None:
     """
     Перехватить TLS ClientHello для целевого домена и применить десинхронизацию.
 
-    Режим 'split':
-      Разбить payload на два TCP-фрагмента и отправить по порядку.
-      DPI видит неполный ClientHello в первом сегменте и не определяет SNI.
+    Режим 'fake_multisplit' (по умолчанию):
+      1. Отправить fake_packet_count поддельных ClientHello с заниженным TTL
+         (до реального сервера не доходят, но видны локальному DPI/ТСПУ).
+      2. Разбить реальный payload на случайное число фрагментов со случайными
+         точками разрыва и отправить их в перемешанном порядке.
+      Современный ТСПУ буферизует и пересобирает поток перед анализом —
+      простое разбиение на 2 части (см. legacy-режимы ниже) он это переживает.
+      Фейковые пакеты засоряют трекинг DPI по потоку, а случайная
+      многосегментность не даёт зафиксировать один и тот же паттерн разрыва.
 
-    Режим 'disorder':
-      Отправить второй фрагмент ПЕРВЫМ (с скорректированным SEQ),
-      затем первый. Большинство DPI-реализаций не переупорядочивают сегменты.
+    Режим 'multisplit':
+      То же самое, но без фейковых пакетов.
+
+    Режимы 'split' / 'disorder' (legacy, оставлены для отката):
+      Разбиение ровно на 2 части в фиксированной позиции split_position.
     """
     payload = bytes(packet.payload) if packet.payload else b""
 
@@ -227,45 +355,73 @@ def process_tcp(packet, config: dict, w) -> None:
     with _stats_lock:
         _stats["intercepted"] += 1
 
-    pos      = config["split_position"]
     mode     = config["desync_mode"]
     base_seq = packet.tcp.seq_num
 
-    if len(payload) <= pos:
+    if len(payload) <= max(2, config["fragment_count_min"]):
         w.send(packet, recalculate_checksum=True)
         return
 
-    part1 = payload[:pos]
-    part2 = payload[pos:]
+    if config["fake_packet_enabled"] and mode in ("fake_multisplit", "multisplit", "split", "disorder"):
+        send_fake_packets(packet, payload, base_seq, config, w)
 
-    if mode == "disorder":
-        packet.payload     = part2
-        packet.tcp.seq_num = (base_seq + pos) & 0xFFFFFFFF
-        w.send(packet, recalculate_checksum=True)
+    if mode in ("multisplit", "fake_multisplit"):
+        positions = pick_fragment_positions(len(payload), config)
+        chunks    = split_payload(payload, positions) if positions else [payload]
 
-        packet.payload     = part1
-        packet.tcp.seq_num = base_seq
-        w.send(packet, recalculate_checksum=True)
+        offsets = [0]
+        for c in chunks[:-1]:
+            offsets.append(offsets[-1] + len(c))
+
+        order = list(range(len(chunks)))
+        if config["shuffle_fragment_order"] and len(order) > 1:
+            random.shuffle(order)
+
+        for i in order:
+            packet.payload     = chunks[i]
+            packet.tcp.seq_num = (base_seq + offsets[i]) & 0xFFFFFFFF
+            w.send(packet, recalculate_checksum=True)
 
         log(
-            f"{GREEN}[TCP DISORDER]{RESET}  TLS ClientHello → "
-            f"фрагм.{YELLOW}②{RESET}({len(part2)} б) → "
-            f"фрагм.{YELLOW}①{RESET}({len(part1)} б)"
+            f"{GREEN}[TCP FAKE+SPLIT]{RESET}  TLS ClientHello → "
+            f"{YELLOW}{len(chunks)}{RESET} фрагм. (перемешан: "
+            f"{YELLOW}{config['shuffle_fragment_order']}{RESET}), "
+            f"фейков: {YELLOW}{config['fake_packet_count'] if config['fake_packet_enabled'] else 0}{RESET}"
         )
+
     else:
-        packet.payload     = part1
-        packet.tcp.seq_num = base_seq
-        w.send(packet, recalculate_checksum=True)
+        pos   = min(config["split_position"], len(payload) - 1)
+        part1 = payload[:pos]
+        part2 = payload[pos:]
 
-        packet.payload     = part2
-        packet.tcp.seq_num = (base_seq + pos) & 0xFFFFFFFF
-        w.send(packet, recalculate_checksum=True)
+        if mode == "disorder":
+            packet.payload     = part2
+            packet.tcp.seq_num = (base_seq + pos) & 0xFFFFFFFF
+            w.send(packet, recalculate_checksum=True)
 
-        log(
-            f"{GREEN}[TCP SPLIT]{RESET}     TLS ClientHello → "
-            f"фрагм.{YELLOW}①{RESET}({len(part1)} б) + "
-            f"фрагм.{YELLOW}②{RESET}({len(part2)} б)"
-        )
+            packet.payload     = part1
+            packet.tcp.seq_num = base_seq
+            w.send(packet, recalculate_checksum=True)
+
+            log(
+                f"{GREEN}[TCP DISORDER]{RESET}  TLS ClientHello → "
+                f"фрагм.{YELLOW}②{RESET}({len(part2)} б) → "
+                f"фрагм.{YELLOW}①{RESET}({len(part1)} б)"
+            )
+        else:
+            packet.payload     = part1
+            packet.tcp.seq_num = base_seq
+            w.send(packet, recalculate_checksum=True)
+
+            packet.payload     = part2
+            packet.tcp.seq_num = (base_seq + pos) & 0xFFFFFFFF
+            w.send(packet, recalculate_checksum=True)
+
+            log(
+                f"{GREEN}[TCP SPLIT]{RESET}     TLS ClientHello → "
+                f"фрагм.{YELLOW}①{RESET}({len(part1)} б) + "
+                f"фрагм.{YELLOW}②{RESET}({len(part2)} б)"
+            )
 
     with _stats_lock:
         _stats["bypassed"] += 1
